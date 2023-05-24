@@ -1,0 +1,32 @@
+@Library('olcne-pipeline') _
+import com.oracle.olcne.pipeline.BranchPattern
+
+def makeDistribution = {
+	// The make-dist program included in this repo sets up the
+	// filesystem so that it can be easily tarballed up and fed
+	// into an RPM build system.  It also generates the ceph.spec
+	// file that is needed to actually make the packages.  Run
+	// that, then do the regular processSpecs stuff.
+	//
+	// Builds of es5-ext after 0.10.53 are known to contain
+	// malware.  Patch the package lock to force the latest
+	// good version.
+	sh '''
+	dnf install -y jq python36 wget tar npm bzip2
+	cat src/pybind/mgr/dashboard/frontend/package-lock.json | jq '.dependencies."es5-ext".version |= "0.10.53" | .dependencies."es5-ext".resolved |= "https://registry.npmjs.org/es5-ext/-/es5-ext-0.10.53.tgz" | .dependencies."es5-ext".integrity |= "sha512-Xs2Stw6NiNHWypzRTY1MtaG/uJlwCk8kH81920ma8mvN8Xq1gsfhZvpkImLQArw8AHnv8MT2I45J3c0R8slE+Q=="' > package-lock.json.new
+	mv package-lock.json.new src/pybind/mgr/dashboard/frontend/package-lock.json
+	./make-dist {{{.major}}}.{{{.minor}}}.{{{.patch}}}
+	mkdir buildrpm
+	mv ceph.spec buildrpm/ceph.spec
+	'''
+
+	processSpecs()
+}
+
+olcnePipeline(
+	branchPattern: new BranchPattern(master: 'oracle/release/{{{.major}}}.{{{.minor}}}.{{{.patch}}}', feature: 'feature/.*'),
+	customStages: [container: [enabled: false]],
+	customSteps: [processSpecs: [method: makeDistribution]],
+	platforms: ['ol8'],
+	yumOL8Repos: ['ol8_codeready_builder', 'ol8_developer_EPEL']
+)
