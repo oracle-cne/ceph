@@ -15,6 +15,10 @@ def makeDistribution = {
 	sh '''
 	patch --strip 1 < "$(pwd)"/buildrpm/build-18.patch
 	'''
+	{{{- else if semverCompare ">=17.0.0" $version }}}
+	sh '''
+	patch --strip 1 < "$(pwd)"/buildrpm/build-17.patch
+	'''
 	{{{- end }}}
 
 	// The make-dist program included in this repo sets up the
@@ -34,7 +38,7 @@ def makeDistribution = {
 	cat src/pybind/mgr/dashboard/frontend/package-lock.json | jq '.dependencies."es5-ext".version |= "0.10.53" | .dependencies."es5-ext".resolved |= "${npm_registry}/es5-ext/-/es5-ext-0.10.53.tgz" | .dependencies."es5-ext".integrity |= "sha512-Xs2Stw6NiNHWypzRTY1MtaG/uJlwCk8kH81920ma8mvN8Xq1gsfhZvpkImLQArw8AHnv8MT2I45J3c0R8slE+Q==" | .dependencies."webpack-dev-server".dependencies.chokidar.requires.fsevents |= "^2.3.2" | .dependencies."webpack-dev-server".dependencies.fsevents.version |= "2.3.2" | .dependencies."webpack-dev-server".dependencies.fsevents.resolved |= "${npm_registry}/fsevents/-/fsevents-2.3.2.tgz" | .dependencies."webpack-dev-server".dependencies.fsevents.integrity |= "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="' > package-lock.json.new
 	mv package-lock.json.new src/pybind/mgr/dashboard/frontend/package-lock.json
 
-	git config --global --add safe.directory "$(pwd)"
+	git config --global --add safe.directory '*'
 
 	./make-dist {{{$version}}}
 
