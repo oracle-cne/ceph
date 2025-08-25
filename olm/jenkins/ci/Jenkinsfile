@@ -1,7 +1,22 @@
+{{{$version := printf "%s.%s.%s" .major .minor .patch }}}
 @Library('olcne-pipeline') _
 import com.oracle.olcne.pipeline.BranchPattern
 
 def makeDistribution = {
+	{{{- if semverCompare ">=19.0.0" $version }}}
+	sh '''
+	patch --strip 1 < "$(pwd)"/buildrpm/build-19.patch
+	sed -i 's/19.2.1/{{{$version}}}/g' container/Containerfile
+	sed -i 's/19.2.1/{{{$version}}}/g' container/build.sh
+
+	mv olm/ceph-container-image.spec buildrpm/
+	'''
+	{{{- else if semverCompare ">=18.0.0" $version }}}
+	sh '''
+	patch --strip 1 < "$(pwd)"/buildrpm/build-18.patch
+	'''
+	{{{- end }}}
+
 	// The make-dist program included in this repo sets up the
 	// filesystem so that it can be easily tarballed up and fed
 	// into an RPM build system.  It also generates the ceph.spec
@@ -12,21 +27,43 @@ def makeDistribution = {
 	// malware.  Patch the package lock to force the latest
 	// good version.
 	sh '''
-	dnf install -y jq python36 wget tar npm bzip2
-	cat src/pybind/mgr/dashboard/frontend/package-lock.json | jq '.dependencies."es5-ext".version |= "0.10.53" | .dependencies."es5-ext".resolved |= "https://registry.npmjs.org/es5-ext/-/es5-ext-0.10.53.tgz" | .dependencies."es5-ext".integrity |= "sha512-Xs2Stw6NiNHWypzRTY1MtaG/uJlwCk8kH81920ma8mvN8Xq1gsfhZvpkImLQArw8AHnv8MT2I45J3c0R8slE+Q=="' > package-lock.json.new
+	dnf install -y jq python3 wget tar npm bzip2 gcc-c++ patch
+	npm config list
+	npm_registry="$(npm config get registry)"
+	sed -i "s;https://registry.npmjs.org;${npm_registry};g" src/pybind/mgr/dashboard/frontend/package-lock.json
+	cat src/pybind/mgr/dashboard/frontend/package-lock.json | jq '.dependencies."es5-ext".version |= "0.10.53" | .dependencies."es5-ext".resolved |= "${npm_registry}/es5-ext/-/es5-ext-0.10.53.tgz" | .dependencies."es5-ext".integrity |= "sha512-Xs2Stw6NiNHWypzRTY1MtaG/uJlwCk8kH81920ma8mvN8Xq1gsfhZvpkImLQArw8AHnv8MT2I45J3c0R8slE+Q==" | .dependencies."webpack-dev-server".dependencies.chokidar.requires.fsevents |= "^2.3.2" | .dependencies."webpack-dev-server".dependencies.fsevents.version |= "2.3.2" | .dependencies."webpack-dev-server".dependencies.fsevents.resolved |= "${npm_registry}/fsevents/-/fsevents-2.3.2.tgz" | .dependencies."webpack-dev-server".dependencies.fsevents.integrity |= "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="' > package-lock.json.new
 	mv package-lock.json.new src/pybind/mgr/dashboard/frontend/package-lock.json
-	./make-dist {{{.major}}}.{{{.minor}}}.{{{.patch}}}
-	mkdir buildrpm
+
+	git config --global --add safe.directory "$(pwd)"
+
+	./make-dist {{{$version}}}
+
+	mkdir -p buildrpm
 	mv ceph.spec buildrpm/ceph.spec
 	'''
 
 	processSpecs()
 }
 
+String image_tag = "v" + "{{{$version}}}"
+
 olcnePipeline(
-	branchPattern: new BranchPattern(master: 'oracle/release/{{{.major}}}.{{{.minor}}}.{{{.patch}}}', feature: 'feature/.*'),
-	customStages: [container: [enabled: false]],
+	branchPattern: new BranchPattern(master: 'oracle/release/{{{$version}}}', feature: 'feature/.*'),
 	customSteps: [processSpecs: [method: makeDistribution]],
+{{{- if semverCompare ">=19.0.0" $version }}}
+        containers: [('container-registry.oracle.com/olcne/ceph:' + image_tag): 'olcne/ceph:' + image_tag],
+        customPlatformStages: [
+            customPlatformSteps: [
+              ol9: [postBuild: [enabled: true], buildContainerRpms: [enabled: true], container: [enabled: true, publishCustomContainers: [enabled: true]]],
+            ],
+          ],
+        platforms: ['ol9'],
+        architectures: ['x86_64', 'aarch64'],
+        yumOL9Repos: ['ol9_codeready_builder', 'ol9_developer_EPEL'],
+{{{- else }}}
+	customStages: [container: [enabled: false]],
 	platforms: ['ol8'],
-	yumOL8Repos: ['ol8_codeready_builder', 'ol8_developer_EPEL']
+        architectures: ['x86_64', 'aarch64'],
+	yumOL8Repos: ['ol8_codeready_builder', 'ol8_developer_EPEL'],
+{{{- end }}}
 )
