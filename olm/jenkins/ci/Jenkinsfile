@@ -11,9 +11,25 @@ def makeDistribution = {
 
 	mv olm/ceph-container-image.spec buildrpm/
 	'''
+	{{{- else if semverCompare ">=18.2.5" $version }}}
+	sh '''
+	patch --strip 1 < "$(pwd)"/buildrpm/build-18-container.patch
+	sed -i 's/18.2.5/{{{$version}}}/g' container/Containerfile
+	sed -i 's/18.2.5/{{{$version}}}/g' container/build.sh
+
+	mv olm/ceph-container-image.spec buildrpm/
+	'''
 	{{{- else if semverCompare ">=18.0.0" $version }}}
 	sh '''
 	patch --strip 1 < "$(pwd)"/buildrpm/build-18.patch
+	'''
+	{{{- else if semverCompare ">=17.2.8, <18.0.0" $version }}}
+	sh '''
+	patch --strip 1 < "$(pwd)"/buildrpm/build-17-container.patch
+	sed -i 's/17.2.8/{{{$version}}}/g' container/Containerfile
+	sed -i 's/17.2.8/{{{$version}}}/g' container/build.sh
+
+	mv olm/ceph-container-image.spec buildrpm/
 	'''
 	{{{- else if semverCompare ">=17.0.0" $version }}}
 	sh '''
@@ -54,7 +70,7 @@ String image_tag = "v" + "{{{$version}}}"
 olcnePipeline(
 	branchPattern: new BranchPattern(master: 'oracle/release/{{{$version}}}', feature: 'feature/.*'),
 	customSteps: [processSpecs: [method: makeDistribution]],
-{{{- if semverCompare ">=19.0.0" $version }}}
+{{{- if semverCompare ">=18.2.5 || >=17.2.8, <18.0.0" $version }}}
         containers: [('container-registry.oracle.com/olcne/ceph:' + image_tag): 'olcne/ceph:' + image_tag],
         customPlatformStages: [
             customPlatformSteps: [
