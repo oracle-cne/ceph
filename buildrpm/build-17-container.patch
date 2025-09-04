@@ -98,7 +98,7 @@ index 0f1318a8ec3..f81ede633ee 100644
  # XXX why isn't this done in the ganesha package?
  RUN mkdir -p /var/run/ganesha
 diff --git a/container/build.sh b/container/build.sh
-index 5edf469d2d2..1796e32fb9a 100755
+index 5edf469d2d2..6a90e781d29 100755
 --- a/container/build.sh
 +++ b/container/build.sh
 @@ -32,6 +32,7 @@ You can avoid the push step (for testing) by setting NO_PUSH to anything
@@ -109,7 +109,26 @@ index 5edf469d2d2..1796e32fb9a 100755
  CI_CONTAINER=${CI_CONTAINER:-false}
  FLAVOR=${FLAVOR:-default}
  # default: current checked-out branch
-@@ -88,12 +89,14 @@ fi
+@@ -57,11 +58,13 @@ fi
+ : "${BRANCH:?}"
+ : "${CEPH_SHA1:?}"
+ : "${ARCH:?}"
+-: "${CONTAINER_REPO_HOSTNAME:?}"
+-: "${CONTAINER_REPO_ORGANIZATION:?}"
+-: "${CONTAINER_REPO_USERNAME:?}"
+-: "${CONTAINER_REPO_PASSWORD:?}"
+-if [[ ${CI_CONTAINER} != "true" ]] ; then ${VERSION:?}; fi
++if [[ ${NO_PUSH} != "true" ]] ; then
++    : "${CONTAINER_REPO_HOSTNAME:?}"
++    : "${CONTAINER_REPO_ORGANIZATION:?}"
++    : "${CONTAINER_REPO_USERNAME:?}"
++    : "${CONTAINER_REPO_PASSWORD:?}"
++fi
++if [[ ${CI_CONTAINER} != "true" ]] ; then : "${VERSION:?}"; fi
+ 
+ # check for valid repo auth (if pushing)
+ ORGURL=${CONTAINER_REPO_HOSTNAME}/${CONTAINER_REPO_ORGANIZATION}
+@@ -88,12 +91,14 @@ fi
  BRANCH=${BRANCH##*/}
  
  podman build --pull=newer --squash -f $CFILE -t build.sh.output \
@@ -125,7 +144,7 @@ index 5edf469d2d2..1796e32fb9a 100755
      2>&1 
  
  image_id=$(podman image ls localhost/build.sh.output --format '{{.ID}}')
-@@ -135,6 +138,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
+@@ -135,6 +140,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
      full_repo_tag=$repopath/ceph:${BRANCH}-${fromtag}-${ARCH}-devel
      branch_repo_tag=$repopath/ceph:${BRANCH}
      sha1_repo_tag=$repopath/ceph:${CEPH_SHA1}
@@ -133,7 +152,7 @@ index 5edf469d2d2..1796e32fb9a 100755
  
      if [[ "${ARCH}" == "arm64" ]] ; then
          branch_repo_tag=${branch_repo_tag}-arm64
-@@ -144,6 +148,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
+@@ -144,6 +150,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
      podman tag ${image_id} ${full_repo_tag}
      podman tag ${image_id} ${branch_repo_tag}
      podman tag ${image_id} ${sha1_repo_tag}
@@ -141,7 +160,7 @@ index 5edf469d2d2..1796e32fb9a 100755
  
      if [[ ${FLAVOR} == "crimson" && ${ARCH} == "x86_64" ]] ; then
          sha1_flavor_repo_tag=${sha1_repo_tag}-${FLAVOR}
-@@ -164,7 +169,7 @@ else
+@@ -164,7 +171,7 @@ else
      # non-CI build.  Tags are like v19.1.0-20240701
      # push to quay.ceph.io/ceph/prerelease
      #
