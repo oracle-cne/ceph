@@ -165,7 +165,7 @@ index 5edf469d2d2..6a90e781d29 100755
      # push to quay.ceph.io/ceph/prerelease
      #
 -    version_tag=${repopath}/prerelease/ceph-${ARCH}:${VERSION}-${builddate}
-+    version_tag=${repopath}/ceph:${VERSION}
++    version_tag=${repopath}/ceph:v${VERSION}
  
      podman tag ${image_id} ${version_tag}
      if [[ -z "${NO_PUSH}" ]] ; then
