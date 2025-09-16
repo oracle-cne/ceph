@@ -68,7 +68,7 @@ def makeDistribution = {
 String image_tag = "v" + "{{{$version}}}"
 
 olcnePipeline(
-	branchPattern: new BranchPattern(master: 'oracle/release/{{{$version}}}', feature: 'feature/.*'),
+	branchPattern: new BranchPattern(master: 'oracle/release/{{{$version}}}', feature: '(?!^release/.*$)(^.*$)'),
 	customSteps: [processSpecs: [method: makeDistribution]],
 {{{- if semverCompare ">=18.2.5 || >=17.2.8, <18.0.0" $version }}}
         containers: [('container-registry.oracle.com/olcne/ceph:' + image_tag): 'olcne/ceph:' + image_tag],
