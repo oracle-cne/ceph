@@ -132,7 +132,7 @@ index 9a5a88e76a1..bbb7c6fcac4 100644
  
 +# Ceph repo rpm
 +RUN dnf config-manager --enable ol9_codeready_builder && \
-+    dnf install -y ceph-$CEPH_VERSION
++    dnf install -y ceph
  
  # Copr repos
  # scikit for mgr-diskprediction-local
