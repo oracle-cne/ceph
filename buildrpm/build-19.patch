@@ -143,7 +143,7 @@ index 9a5a88e76a1..bbb7c6fcac4 100644
 +RUN dnf install -y --setopt=install_weak_deps=False dnf-plugins-core
  
  # Update package mgr
- RUN dnf update -y --setopt=install_weak_deps=False
+ RUN dnf update -y --setopt=install_weak_deps=False dnf
 @@ -168,15 +153,12 @@ RUN echo "systemd-udev" >> packages.txt
  #       ref: https://github.com/ceph/ceph-container/pull/2013#issuecomment-1248606472
  RUN echo "gdisk hostname procps-ng sg3_utils e2fsprogs lvm2 gcc" >> packages.txt
