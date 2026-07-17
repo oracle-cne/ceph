@@ -1,8 +1,7 @@
 ---
-name: Issue Backporting
+name: Create backport trackers for trackers in "Pending Backport" state
 on:
   # To manually trigger this: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_dispatch
-  # View past runs and output: https://github.com/ceph/ceph/actions/workflows/create-backport-trackers.yml
   workflow_dispatch:
     inputs:
       issues:
@@ -35,18 +34,14 @@ on:
 jobs:
   create-backports:
     runs-on: ubuntu-latest
-    # Backport checks need to be run ONLY on the main branch on ceph/ceph (not forks)
-    if: github.ref == 'refs/heads/main' && github.repository == 'ceph/ceph'
+    if: github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: Bhacaz/checkout-files@e3e34e7daef91a5f237485bb88a260aee4be29dd
         with:
-          sparse-checkout: | 
-              src/script/backport-create-issue
-              src/script/requirements.backport-create-issue.txt
-          sparse-checkout-cone-mode: false
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+          files: src/script/backport-create-issue src/script/requirements.backport-create-issue.txt
+      - uses: actions/setup-python@v4
         with:
-          python-version: '>=3.6 <3.12'
+          python-version: '>=3.6'
           cache: 'pip'
           cache-dependency-path: src/script/requirements.backport-create-issue.txt
       - run: pip install -r src/script/requirements.backport-create-issue.txt
