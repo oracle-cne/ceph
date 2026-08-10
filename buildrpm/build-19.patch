@@ -173,23 +173,15 @@ index d59d08f04a3..49e5cfa7db3 100755
  CI_CONTAINER=${CI_CONTAINER:-false}
  FLAVOR=${FLAVOR:-default}
  # default: current checked-out branch
-@@ -108,13 +109,15 @@ echo -e "\
-     PRERELEASE_PASSWORD=${PRERELEASE_PASSWORD}\n " > prerelease.secret.txt
+@@ -152,7 +153,8 @@ build_args+=(
+     --build-arg "CEPH_GIT_REPO=${CEPH_GIT_REPO}"
+     --build-arg "CEPH_REF=${BRANCH:-main}"
+     --build-arg "OSD_FLAVOR=${FLAVOR:-default}"
+     --build-arg "CI_CONTAINER=${CI_CONTAINER:-default}"
++    --build-arg "CEPH_VERSION=${CEPH_VERSION:-19.2.1}"
+     --secret=id=prerelease_creds,src=./prerelease.secret.txt
+ )
  
- podman build --pull=newer --squash -f $CFILE -t build.sh.output \
--    --build-arg FROM_IMAGE=${FROM_IMAGE:-quay.io/centos/centos:stream9} \
-+    --build-arg FROM_IMAGE=${FROM_IMAGE:-container-registry.oracle.com/os/oraclelinux:9} \
-     --build-arg CEPH_SHA1=${CEPH_SHA1} \
-     --build-arg CEPH_GIT_REPO=${CEPH_GIT_REPO} \
-     --build-arg CEPH_REF=${BRANCH:-main} \
-     --build-arg OSD_FLAVOR=${FLAVOR:-default} \
-     --build-arg CI_CONTAINER=${CI_CONTAINER:-default} \
-+    --build-arg CEPH_VERSION=${CEPH_VERSION:-19.2.1} \
-     --secret=id=prerelease_creds,src=./prerelease.secret.txt \
-+    --volume /etc/yum.repos.d:/etc/yum.repos.d \
-     2>&1 
- 
- rm ./prerelease.secret.txt
 @@ -158,6 +161,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
      full_repo_tag=${repopath}:${BRANCH}-${fromtag}-${ARCH}-devel
      branch_repo_tag=${repopath}:${BRANCH}
