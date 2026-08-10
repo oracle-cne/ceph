@@ -28,15 +28,42 @@ CONTAINER_REPO_PASSWORD
 PRERELEASE_USERNAME for download.ceph.com:/prerelease/ceph
 PRERELEASE_PASSWORD
 REMOVE_LOCAL_IMAGES set to 'false' if you want to keep local images
+YUM_REPO_CONFIG_FILE optional yum repo config file to mount into the image build
 
 For a release build: (from ceph.git, built and pushed to download.ceph.com)
 CI_CONTAINER: must be 'false'
 and you must also add
 VERSION (for instance, 19.1.0) for tagging the image
 REMOVE_LOCAL_IMAGES set to 'false' if you want to keep local images
+YUM_REPO_CONFIG_FILE optional yum repo config file to mount into the image build
 
 You can avoid the push step (for testing) by setting NO_PUSH to anything
 EOF
+}
+
+build_args=()
+
+mount_yum_config() {
+    local yum_repo_config_file="${YUM_REPO_CONFIG_FILE:-}"
+
+    if [[ -z "${yum_repo_config_file}" ]]; then
+        echo "build.sh: YUM_REPO_CONFIG_FILE is not set; using base image repository configuration"
+        return
+    elif [[ "${yum_repo_config_file}" != /* ]]; then
+        yum_repo_config_file="$(pwd)/${yum_repo_config_file}"
+    fi
+
+    echo "build.sh: checking yum repo config file ${yum_repo_config_file}"
+    if [[ ! -s "${yum_repo_config_file}" ]]; then
+        echo "build.sh: yum repo config file ${yum_repo_config_file} is missing or empty" >&2
+        exit 1
+    fi
+
+    echo "build.sh: mounting yum repo config file ${yum_repo_config_file}"
+    build_args=(
+        --volume "${yum_repo_config_file}:/etc/yum.repos.d/extra.repo:ro"
+        "${build_args[@]}"
+    )
 }
 
 CI_CONTAINER=${CI_CONTAINER:-false}
@@ -105,6 +132,8 @@ fi
 # BRANCH will be, say, origin/main.  remove <remote>/
 BRANCH=${BRANCH##*/}
 
+mount_yum_config
+
 # podman build only supports secret files.
 # This must be removed after podman build
 touch prerelease.secret.txt
@@ -113,15 +142,21 @@ echo -e "\
     PRERELEASE_USERNAME=${PRERELEASE_USERNAME}\n
     PRERELEASE_PASSWORD=${PRERELEASE_PASSWORD}\n " > prerelease.secret.txt
 
-podman build --pull=newer --squash -f $CFILE -t build.sh.output \
-    --build-arg FROM_IMAGE=${FROM_IMAGE:-quay.io/centos/centos:stream9} \
-    --build-arg CEPH_SHA1=${CEPH_SHA1} \
-    --build-arg CEPH_GIT_REPO=${CEPH_GIT_REPO} \
-    --build-arg CEPH_REF=${BRANCH:-main} \
-    --build-arg OSD_FLAVOR=${FLAVOR:-default} \
-    --build-arg CI_CONTAINER=${CI_CONTAINER:-default} \
-    --secret=id=prerelease_creds,src=./prerelease.secret.txt \
-    2>&1 
+build_args+=(
+    --pull=newer
+    --squash
+    -f "${CFILE}"
+    -t build.sh.output
+    --build-arg "FROM_IMAGE=${FROM_IMAGE:-container-registry.oracle.com/os/oraclelinux:9}"
+    --build-arg "CEPH_SHA1=${CEPH_SHA1}"
+    --build-arg "CEPH_GIT_REPO=${CEPH_GIT_REPO}"
+    --build-arg "CEPH_REF=${BRANCH:-main}"
+    --build-arg "OSD_FLAVOR=${FLAVOR:-default}"
+    --build-arg "CI_CONTAINER=${CI_CONTAINER:-default}"
+    --secret=id=prerelease_creds,src=./prerelease.secret.txt
+)
+
+podman build "${build_args[@]}" 2>&1
 
 rm ./prerelease.secret.txt
 
@@ -209,4 +244,3 @@ else
         fi
     fi
 fi
-
