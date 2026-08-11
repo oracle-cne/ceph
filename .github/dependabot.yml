@@ -17,6 +17,6 @@ updates:
     schedule:
       interval: "daily"
     commit-message:
-      prefix: ".github:"
+      prefix: ".github/workflows:"
     pull-request-branch-name:
       separator: "-"
