@@ -1,0 +1,286 @@
+diff --git a/ceph.spec.in b/ceph.spec.in
+index 2af66b1d432..b851da0d8e5 100644
+--- a/ceph.spec.in
++++ b/ceph.spec.in
+@@ -176,13 +176,14 @@ Epoch:		2
+ # undefined
+ %global _epoch_prefix %{?epoch:%{epoch}:}
+ 
++Vendor:	Oracle America
+ Summary:	User space components of the Ceph file system
+ License:	LGPL-2.1 and LGPL-3.0 and CC-BY-SA-3.0 and GPL-2.0 and BSL-1.0 and BSD-3-Clause and MIT
+ %if 0%{?suse_version}
+ Group:		System/Filesystems
+ %endif
+ URL:		http://ceph.com/
+-Source0:	%{?_remote_tarball_prefix}@TARBALL_BASENAME@.tar.bz2
++Source0:	@TARBALL_BASENAME@.tar.bz2
+ %if 0%{?suse_version}
+ # _insert_obs_source_lines_here
+ ExclusiveArch:  x86_64 aarch64 ppc64le s390x
+@@ -217,6 +218,8 @@ BuildRequires:	%{gts_prefix}-gcc-c++
+ BuildRequires:	%{gts_prefix}-build
+ %ifarch aarch64
+ BuildRequires:	%{gts_prefix}-libatomic-devel
++BuildRequires:	systemtap-sdt-devel
++BuildRequires:	%{gts_prefix}-systemtap-sdt-devel
+ %endif
+ %endif
+ %if 0%{?fedora} || 0%{?rhel} == 9 || 0%{?openEuler}
+@@ -1416,7 +1419,10 @@ cmake .. \
+     -DWITH_SEASTAR:BOOL=ON \
+     -DWITH_JAEGER:BOOL=OFF \
+ %endif
+-    -DWITH_GRAFANA:BOOL=ON
++    -DWITH_GRAFANA:BOOL=ON \
++    -DARROW_XSIMD_URL="file://$PWD/xsimd.tar.gz" \
++    -DARROW_GDB_DEBUG:BOOL=OFF \
++    -DCMAKE_BUILD_TYPE=release
+ 
+ %if %{with cmake_verbose_logging}
+ cat ./CMakeFiles/CMakeOutput.log
+diff --git a/container/Containerfile b/container/Containerfile
+index 0f1318a8ec3..f81ede633ee 100644
+--- a/container/Containerfile
++++ b/container/Containerfile
+@@ -1,4 +1,4 @@
+-ARG FROM_IMAGE="quay.io/centos/centos:stream9"
++ARG FROM_IMAGE="container-registry.oracle.com/os/oraclelinux:9"
+ FROM $FROM_IMAGE
+ 
+ # allow FROM_IMAGE to be visible inside this stage
+@@ -71,20 +71,12 @@ RUN set -x && \
+             curl -s -L https://shaman.ceph.com/api/repos/ceph-iscsi/main/latest/centos/9/repo -o /etc/yum.repos.d/ceph-iscsi.repo ;\
+             ;;\
+     esac
++# Ceph version
++ARG CEPH_VERSION="17.2.8"
+ 
+-# Ceph repo
+-RUN set -x && \
+-    rpm --import 'https://download.ceph.com/keys/release.asc' && \
+-    ARCH=$(arch); if [ "${ARCH}" == "aarch64" ]; then ARCH="arm64"; fi ;\
+-    IS_RELEASE=0 ;\
+-    if [[ "${CI_CONTAINER}" == "true" ]] ; then \
+-        # TODO: this can return different ceph builds (SHA1) for x86 vs. arm runs. is it important to fix?
+-        REPO_URL=$(curl -s "https://shaman.ceph.com/api/search/?project=ceph&distros=centos/9/${ARCH}&flavor=${OSD_FLAVOR}&ref=${CEPH_REF}&sha1=latest" | jq -r .[0].url) ;\
+-    else \
+-        IS_RELEASE=1 ;\
+-        REPO_URL="http://download.ceph.com/rpm-${CEPH_REF}/el9/" ;\
+-    fi && \
+-    rpm -Uvh "$REPO_URL/noarch/ceph-release-1-${IS_RELEASE}.el9.noarch.rpm"
++# Ceph repo rpm
++RUN dnf config-manager --enable ol9_codeready_builder && \
++    dnf install -y ceph-$CEPH_VERSION
+ 
+ # Copr repos
+ # scikit for mgr-diskprediction-local
+@@ -92,6 +84,7 @@ RUN set -x && \
+ RUN \
+     dnf install -y --setopt=install_weak_deps=False dnf-plugins-core && \
+     dnf copr enable -y tchaikov/python-scikit-learn
++RUN dnf install -y --setopt=install_weak_deps=False dnf-plugins-core
+ 
+ # Update package mgr
+ RUN dnf update -y --setopt=install_weak_deps=False
+@@ -161,12 +154,9 @@ RUN echo "systemd-udev" >> packages.txt
+ #       ref: https://github.com/ceph/ceph-container/pull/2013#issuecomment-1248606472
+ RUN echo "gdisk hostname procps-ng sg3_utils e2fsprogs lvm2 gcc" >> packages.txt
+ 
+-# scikit
+-RUN echo "python3-scikit-learn" >> packages.txt
+-
+ RUN echo "=== PACKAGES TO BE INSTALLED ==="; cat packages.txt
+ RUN echo "=== INSTALLING ===" ; \
+-dnf install -y --setopt=install_weak_deps=False --setopt=skip_missing_names_on_install=False --enablerepo=crb $(cat packages.txt)
++dnf install -y --setopt=install_weak_deps=False --setopt=skip_missing_names_on_install=False $(cat packages.txt)
+ 
+ # XXX why isn't this done in the ganesha package?
+ RUN mkdir -p /var/run/ganesha
+diff --git a/container/build.sh b/container/build.sh
+index 5edf469d2d2..6a90e781d29 100755
+--- a/container/build.sh
++++ b/container/build.sh
+@@ -32,6 +32,7 @@ You can avoid the push step (for testing) by setting NO_PUSH to anything
+ EOF
+ }
+ 
++CEPH_VERSION=${CEPH_VERSION:-"17.2.8"}
+ CI_CONTAINER=${CI_CONTAINER:-false}
+ FLAVOR=${FLAVOR:-default}
+ # default: current checked-out branch
+@@ -57,11 +58,13 @@ fi
+ : "${BRANCH:?}"
+ : "${CEPH_SHA1:?}"
+ : "${ARCH:?}"
+-: "${CONTAINER_REPO_HOSTNAME:?}"
+-: "${CONTAINER_REPO_ORGANIZATION:?}"
+-: "${CONTAINER_REPO_USERNAME:?}"
+-: "${CONTAINER_REPO_PASSWORD:?}"
+-if [[ ${CI_CONTAINER} != "true" ]] ; then ${VERSION:?}; fi
++if [[ ${NO_PUSH} != "true" ]] ; then
++    : "${CONTAINER_REPO_HOSTNAME:?}"
++    : "${CONTAINER_REPO_ORGANIZATION:?}"
++    : "${CONTAINER_REPO_USERNAME:?}"
++    : "${CONTAINER_REPO_PASSWORD:?}"
++fi
++if [[ ${CI_CONTAINER} != "true" ]] ; then : "${VERSION:?}"; fi
+ 
+ # check for valid repo auth (if pushing)
+ ORGURL=${CONTAINER_REPO_HOSTNAME}/${CONTAINER_REPO_ORGANIZATION}
+@@ -88,12 +91,14 @@ fi
+ BRANCH=${BRANCH##*/}
+ 
+ podman build --pull=newer --squash -f $CFILE -t build.sh.output \
+-    --build-arg FROM_IMAGE=${FROM_IMAGE:-quay.io/centos/centos:stream9} \
++    --build-arg FROM_IMAGE=${FROM_IMAGE:-container-registry.oracle.com/os/oraclelinux:9} \
+     --build-arg CEPH_SHA1=${CEPH_SHA1} \
+     --build-arg CEPH_GIT_REPO=${CEPH_GIT_REPO} \
+     --build-arg CEPH_REF=${BRANCH:-main} \
+     --build-arg OSD_FLAVOR=${FLAVOR:-default} \
+     --build-arg CI_CONTAINER=${CI_CONTAINER:-default} \
++    --build-arg CEPH_VERSION=${CEPH_VERSION:-17.2.8} \
++    --volume /etc/yum.repos.d:/etc/yum.repos.d \
+     2>&1 
+ 
+ image_id=$(podman image ls localhost/build.sh.output --format '{{.ID}}')
+@@ -135,6 +140,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
+     full_repo_tag=$repopath/ceph:${BRANCH}-${fromtag}-${ARCH}-devel
+     branch_repo_tag=$repopath/ceph:${BRANCH}
+     sha1_repo_tag=$repopath/ceph:${CEPH_SHA1}
++    version_repo_tag=${repopath}:v${CEPH_VERSION}
+ 
+     if [[ "${ARCH}" == "arm64" ]] ; then
+         branch_repo_tag=${branch_repo_tag}-arm64
+@@ -144,6 +150,7 @@ if [[ ${CI_CONTAINER} == "true" ]] ; then
+     podman tag ${image_id} ${full_repo_tag}
+     podman tag ${image_id} ${branch_repo_tag}
+     podman tag ${image_id} ${sha1_repo_tag}
++    podman tag ${image_id} ${version_repo_tag}
+ 
+     if [[ ${FLAVOR} == "crimson" && ${ARCH} == "x86_64" ]] ; then
+         sha1_flavor_repo_tag=${sha1_repo_tag}-${FLAVOR}
+@@ -164,7 +171,7 @@ else
+     # non-CI build.  Tags are like v19.1.0-20240701
+     # push to quay.ceph.io/ceph/prerelease
+     #
+-    version_tag=${repopath}/prerelease/ceph-${ARCH}:${VERSION}-${builddate}
++    version_tag=${repopath}/ceph:v${VERSION}
+ 
+     podman tag ${image_id} ${version_tag}
+     if [[ -z "${NO_PUSH}" ]] ; then
+diff --git a/make-dist b/make-dist
+index d71c48e8882..58de275aab2 100755
+--- a/make-dist
++++ b/make-dist
+@@ -86,8 +86,8 @@ download_boost() {
+         --exclude="$boost_version_underscore/tools/auto_index" \
+         --exclude='doc' --exclude='more' --exclude='status'
+     mv src/boost_${boost_version_underscore} src/boost
+-    tar cf ${outfile}.boost.tar ${outfile}/src/boost
+-    rm -rf src/boost
++    #tar cf ${outfile}.boost.tar ${outfile}/src/boost
++    #rm -rf src/boost
+ }
+ 
+ download_liburing() {
+@@ -105,8 +105,8 @@ download_liburing() {
+     # normalize the names, liburing-0.7 if downloaded from git.kernel.dk,
+     # liburing-liburing-0.7 from github.com
+     mv src/liburing-* src/liburing
+-    tar cf ${outfile}.liburing.tar ${outfile}/src/liburing
+-    rm -rf src/liburing
++    #tar cf ${outfile}.liburing.tar ${outfile}/src/liburing
++    #rm -rf src/liburing
+ }
+ 
+ download_pmdk() {
+@@ -122,8 +122,20 @@ download_pmdk() {
+         --exclude="pmdk-${pmdk_version}/src/examples" \
+         --exclude="pmdk-${pmdk_version}/src/benchmarks"
+     mv src/pmdk-${pmdk_version} src/pmdk
+-    tar cf ${outfile}.pmdk.tar ${outfile}/src/pmdk
+-    rm -rf src/pmdk
++    #tar cf ${outfile}.pmdk.tar ${outfile}/src/pmdk
++    #rm -rf src/pmdk
++}
++
++download_xsimd() {
++	set -x
++	xsimd_version=$1
++	shift
++	xsimd_sha256=$1
++	shift
++	xsimd_fname=$xsimd_version.tar.gz
++	download_from $xsimd_fname $xsimd_sha256 $*
++	mv $xsimd_fname ${outfile}/xsimd.tar.gz
++	set +x
+ }
+ 
+ build_dashboard_frontend() {
+@@ -144,12 +156,12 @@ build_dashboard_frontend() {
+   deactivate
+   cd $CURR_DIR
+   rm -rf $TEMP_DIR
+-  tar cf dashboard_frontend.tar $outfile/src/pybind/mgr/dashboard/frontend/dist
++  #tar cf dashboard_frontend.tar $outfile/src/pybind/mgr/dashboard/frontend/dist
+ }
+ 
+ generate_rook_ceph_client() {
+   $outfile/src/pybind/mgr/rook/generate_rook_ceph_client.sh
+-  tar cf rook_ceph_client.tar $outfile/src/pybind/mgr/rook/rook_client/*.py
++  #tar cf rook_ceph_client.tar $outfile/src/pybind/mgr/rook/rook_client/*.py
+ }
+ 
+ # clean out old cruft...
+@@ -188,7 +200,7 @@ for spec in ceph.spec.in; do
+         sed "s/@TARBALL_BASENAME@/ceph-$version/g" > `echo $spec | sed 's/.in$//'`
+ done
+ ln -s . $outfile
+-tar cvf $outfile.version.tar $outfile/src/.git_version $outfile/ceph.spec
++#tar cvf $outfile.version.tar $outfile/src/.git_version $outfile/ceph.spec
+ # NOTE: If you change this version number make sure the package is available
+ # at the three URLs referenced below (may involve uploading to download.ceph.com)
+ boost_version=1.75.0
+@@ -204,20 +216,26 @@ download_pmdk $pmdk_version 08dafcf94db5ac13fac9139c92225d9aa5f3724ea74beee4e6ca
+                https://github.com/pmem/pmdk/releases/download/$pmdk_version
+ build_dashboard_frontend
+ generate_rook_ceph_client
+-for tarball in $outfile.version   \
+-               $outfile.boost     \
+-               $outfile.liburing  \
+-               $outfile.pmdk  \
+-               dashboard_frontend \
+-               rook_ceph_client   \
+-               $outfile; do
+-    tar --concatenate -f $outfile.all.tar $tarball.tar
+-    rm $tarball.tar
+-done
+-mv $outfile.all.tar $outfile.tar
+-rm $outfile
+-
+-echo "compressing..."
+-bzip2 -9 $outfile.tar
++#for tarball in $outfile.version   \
++#               $outfile.boost     \
++#               $outfile.liburing  \
++#               $outfile.pmdk  \
++#               dashboard_frontend \
++#               rook_ceph_client   \
++#               $outfile; do
++#    tar --concatenate -f $outfile.all.tar $tarball.tar
++#    rm $tarball.tar
++#done
++
++xsimd_version=aeec9c872c8b475dedd7781336710f2dd2666cb2
++download_xsimd $xsimd_version 0a841e6c8acf216150e4fc19fca8e29fbab9614b56ac7b96e56019264ca27b26 \
++	       https://github.com/xtensor-stack/xsimd/archive
++#tar --append -f $outfile.all.tar ${outfile}/xsimd.tar.gz
++
++#mv $outfile.all.tar $outfile.tar
++#rm $outfile
++
++#echo "compressing..."
++#bzip2 -9 $outfile.tar
+ 
+ echo "done."

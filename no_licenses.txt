@@ -1,0 +1,7 @@
+format@0.2.2
+ng2-charts@2.4.2
+toggle-selection@1.0.6
+tr46@0.0.3
+@angular/router@12.2.13
+fork-awesome@1.1.7
+
