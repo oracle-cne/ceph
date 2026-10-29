@@ -1,26 +1,19 @@
 ---
 name: "Pull Request Checklist"
 on:
-  pull_request_target:
-    branches:
-      - main
+  pull_request:
     types:
       - edited
       - opened
       - reopened
-
-# https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-scopes
-permissions:
-  pull-requests: read
-
 jobs:
   pr_checklist:
     runs-on: ubuntu-latest
-    name: Verify Checklist
+    name: Verify
     steps:
       - name: Sleep for 30 seconds
         run: sleep 30s
         shell: bash
       - name: Action
         id: checklist
-        uses: ceph/ceph-pr-checklist-action@bbb22324f4542fe8ca98c9be74b3aa4365eec38b
+        uses: ceph/ceph-pr-checklist-action@32e92d1a2a7c9991ed51de5fccb2296551373d60
