@@ -1,0 +1,205 @@
+diff --git a/bin/git-archive-all.sh b/bin/git-archive-all.sh
+index 513b50a2c49..24fea2f692a 100755
+--- a/bin/git-archive-all.sh
++++ b/bin/git-archive-all.sh
+@@ -237,6 +237,7 @@ fi
+ while read path; do
+     TREEISH=$(git submodule | grep "^ .*${path%/} " | cut -d ' ' -f 2) # git submodule does not list trailing slashes in $path
+     cd "$path"
++    git config --global --add safe.directory "$(pwd)"
+     git archive --format=$FORMAT --prefix="${PREFIX}$path" ${TREEISH:-HEAD} > "$TMPDIR"/"$(echo "$path" | sed -e 's/\//./g')"$FORMAT
+     if [ $FORMAT == 'zip' ]; then
+         # delete the empty directory entry; zipped submodules won't unzip if we don't do this
+diff --git a/ceph.spec.in b/ceph.spec.in
+index f0dd8e8a941..3d100393c33 100644
+--- a/ceph.spec.in
++++ b/ceph.spec.in
+@@ -180,13 +180,14 @@ Epoch:		2
+ # undefined
+ %global _epoch_prefix %{?epoch:%{epoch}:}
+ 
++Vendor:	Oracle America
+ Summary:	User space components of the Ceph file system
+ License:	LGPL-2.1 and LGPL-3.0 and CC-BY-SA-3.0 and GPL-2.0 and BSL-1.0 and BSD-3-Clause and MIT
+ %if 0%{?suse_version}
+ Group:		System/Filesystems
+ %endif
+ URL:		http://ceph.com/
+-Source0:	%{?_remote_tarball_prefix}@TARBALL_BASENAME@.tar.bz2
++Source0:	@TARBALL_BASENAME@.tar.bz2
+ %if 0%{?suse_version}
+ # _insert_obs_source_lines_here
+ ExclusiveArch:  x86_64 aarch64 ppc64le s390x
+@@ -221,6 +222,8 @@ BuildRequires: gcc11-c++
+ BuildRequires:	%{gts_prefix}-gcc-c++
+ BuildRequires:	%{gts_prefix}-build
+ BuildRequires:	%{gts_prefix}-libatomic-devel
++BuildRequires:	systemtap-sdt-devel
++BuildRequires:	%{gts_prefix}-systemtap-sdt-devel
+ %endif
+ %if 0%{?fedora} || 0%{?rhel} == 9
+ BuildRequires:  libatomic
+@@ -1317,13 +1320,12 @@ export CFLAGS="$RPM_OPT_FLAGS"
+ export CXXFLAGS="$RPM_OPT_FLAGS"
+ export LDFLAGS="$RPM_LD_FLAGS"
+ 
+-%if 0%{with seastar}
+ # seastar uses longjmp() to implement coroutine. and this annoys longjmp_chk()
+ export CXXFLAGS=$(echo $RPM_OPT_FLAGS | sed -e 's/-Wp,-D_FORTIFY_SOURCE=2//g')
+ # remove from CFLAGS too because it causes the arrow submodule to fail with:
+ #   warning _FORTIFY_SOURCE requires compiling with optimization (-O)
+ export CFLAGS=$(echo $RPM_OPT_FLAGS | sed -e 's/-Wp,-D_FORTIFY_SOURCE=2//g')
+-%endif
++
+ 
+ env | sort
+ 
+@@ -1333,10 +1335,6 @@ env | sort
+ mkdir -p %{_vpath_builddir}
+ pushd %{_vpath_builddir}
+ cmake .. \
+-%if 0%{?suse_version} == 1500
+-    -DCMAKE_C_COMPILER=gcc-11 \
+-    -DCMAKE_CXX_COMPILER=g++-11 \
+-%endif
+     -DCMAKE_INSTALL_PREFIX=%{_prefix} \
+     -DCMAKE_INSTALL_LIBDIR:PATH=%{_libdir} \
+     -DCMAKE_INSTALL_LIBEXECDIR:PATH=%{_libexecdir} \
+@@ -1429,7 +1427,10 @@ cmake .. \
+     -DWITH_SEASTAR:BOOL=ON \
+     -DWITH_JAEGER:BOOL=OFF \
+ %endif
+-    -DWITH_GRAFANA:BOOL=ON
++    -DWITH_GRAFANA:BOOL=ON \
++    -DARROW_XSIMD_URL="file://$PWD/xsimd.tar.gz" \
++    -DARROW_GDB_DEBUG:BOOL=OFF \
++    -DCMAKE_BUILD_TYPE=release
+ 
+ %if %{with cmake_verbose_logging}
+ cat ./CMakeFiles/CMakeOutput.log
+diff --git a/make-dist b/make-dist
+index 721e9128c45..b6da2fd6325 100755
+--- a/make-dist
++++ b/make-dist
+@@ -1,4 +1,5 @@
+ #!/bin/bash -e
++set -x
+ 
+ SCRIPTNAME="$(basename "${0}")"
+ BASEDIR="$(readlink -f "$(dirname "${0}")")"
+@@ -86,8 +87,8 @@ download_boost() {
+         --exclude="$boost_version_underscore/tools/auto_index" \
+         --exclude='doc' --exclude='more' --exclude='status'
+     mv src/boost_${boost_version_underscore} src/boost
+-    tar cf ${outfile}.boost.tar ${outfile}/src/boost
+-    rm -rf src/boost
++    #tar cf ${outfile}.boost.tar ${outfile}/src/boost
++    #rm -rf src/boost
+ }
+ 
+ download_liburing() {
+@@ -105,8 +106,8 @@ download_liburing() {
+     # normalize the names, liburing-0.7 if downloaded from git.kernel.dk,
+     # liburing-liburing-0.7 from github.com
+     mv src/liburing-* src/liburing
+-    tar cf ${outfile}.liburing.tar ${outfile}/src/liburing
+-    rm -rf src/liburing
++    #tar cf ${outfile}.liburing.tar ${outfile}/src/liburing
++    #rm -rf src/liburing
+ }
+ 
+ download_pmdk() {
+@@ -122,8 +123,20 @@ download_pmdk() {
+         --exclude="pmdk-${pmdk_version}/src/examples" \
+         --exclude="pmdk-${pmdk_version}/src/benchmarks"
+     mv src/pmdk-${pmdk_version} src/pmdk
+-    tar cf ${outfile}.pmdk.tar ${outfile}/src/pmdk
+-    rm -rf src/pmdk
++    #tar cf ${outfile}.pmdk.tar ${outfile}/src/pmdk
++    #rm -rf src/pmdk
++}
++
++download_xsimd() {
++	set -x
++	xsimd_version=$1
++	shift
++	xsimd_sha256=$1
++	shift
++	xsimd_fname=$xsimd_version.tar.gz
++	download_from $xsimd_fname $xsimd_sha256 $*
++	mv $xsimd_fname ${outfile}/xsimd.tar.gz
++	set +x
+ }
+ 
+ build_dashboard_frontend() {
+@@ -144,12 +157,12 @@ build_dashboard_frontend() {
+   deactivate
+   cd $CURR_DIR
+   rm -rf $TEMP_DIR
+-  tar cf dashboard_frontend.tar $outfile/src/pybind/mgr/dashboard/frontend/dist
++  #tar cf dashboard_frontend.tar $outfile/src/pybind/mgr/dashboard/frontend/dist
+ }
+ 
+ generate_rook_ceph_client() {
+   $outfile/src/pybind/mgr/rook/generate_rook_ceph_client.sh
+-  tar cf rook_ceph_client.tar $outfile/src/pybind/mgr/rook/rook_client/*.py
++  #tar cf rook_ceph_client.tar $outfile/src/pybind/mgr/rook/rook_client/*.py
+ }
+ 
+ # clean out old cruft...
+@@ -188,12 +201,11 @@ for spec in ceph.spec.in; do
+         sed "s/@TARBALL_BASENAME@/ceph-$version/g" > `echo $spec | sed 's/.in$//'`
+ done
+ ln -s . $outfile
+-tar cvf $outfile.version.tar $outfile/src/.git_version $outfile/ceph.spec
++#tar cvf $outfile.version.tar $outfile/src/.git_version $outfile/ceph.spec
+ # NOTE: If you change this version number make sure the package is available
+ # at the three URLs referenced below (may involve uploading to download.ceph.com)
+ boost_version=1.79.0
+ download_boost $boost_version 475d589d51a7f8b3ba2ba4eda022b170e562ca3b760ee922c146b6c65856ef39 \
+-               https://boostorg.jfrog.io/artifactory/main/release/$boost_version/source \
+                https://download.ceph.com/qa
+ download_liburing 0.7 8e2842cfe947f3a443af301bdd6d034455536c38a455c7a700d0c1ad165a7543 \
+                   https://github.com/axboe/liburing/archive \
+@@ -203,20 +215,26 @@ download_pmdk $pmdk_version 08dafcf94db5ac13fac9139c92225d9aa5f3724ea74beee4e6ca
+                https://github.com/pmem/pmdk/releases/download/$pmdk_version
+ build_dashboard_frontend
+ generate_rook_ceph_client
+-for tarball in $outfile.version   \
+-               $outfile.boost     \
+-               $outfile.liburing  \
+-               $outfile.pmdk  \
+-               dashboard_frontend \
+-               rook_ceph_client   \
+-               $outfile; do
+-    tar --concatenate -f $outfile.all.tar $tarball.tar
+-    rm $tarball.tar
+-done
+-mv $outfile.all.tar $outfile.tar
+-rm $outfile
+-
+-echo "compressing..."
+-bzip2 -9 $outfile.tar
++xsimd_version=aeec9c872c8b475dedd7781336710f2dd2666cb2
++download_xsimd $xsimd_version 0a841e6c8acf216150e4fc19fca8e29fbab9614b56ac7b96e56019264ca27b26 \
++	       https://github.com/xtensor-stack/xsimd/archive
++#for tarball in $outfile.version   \
++#               $outfile.boost     \
++#               $outfile.liburing  \
++#               $outfile.pmdk  \
++#               dashboard_frontend \
++#               rook_ceph_client   \
++#               $outfile; do
++#    tar --concatenate -f $outfile.all.tar $tarball.tar
++#    rm $tarball.tar
++#done
++#mv $outfile.all.tar $outfile.tar
++#rm $outfile
++
++#echo "compressing..."
++#bzip2 -9 $outfile.tar
++
++echo "remove .git"
++rm -rf .git
+ 
+ echo "done."
